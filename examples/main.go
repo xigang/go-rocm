@@ -40,7 +40,7 @@ func main() {
 			klog.Errorf("Failed to get utilization for device %d: %v", i, err)
 		}
 
-		mem, err := device.GetMemoryInfo()
+		mem, err := device.GetMemoryUsage(0)
 		if err != nil {
 			klog.Errorf("Failed to get memory info for device %d: %v", i, err)
 		}

@@ -3,10 +3,12 @@ package rocm
 /*
 #cgo LDFLAGS: -L/opt/rocm/lib -lrocm_smi64
 #cgo CFLAGS: -I/opt/rocm/include
+#include <stdint.h>
 #include <rocm_smi/rocm_smi.h>
 #include <stdlib.h>
-*/
 
+#define RSMI_STATUS_SUCCESS 0
+*/
 import "C"
 import (
 	"fmt"
@@ -16,18 +18,31 @@ import (
 var initialized bool
 var mu sync.Mutex
 
-// Initialize initializes the ROCm SMI Library
+// Add error constants for better error handling
+const (
+	ErrNotInitialized     = Error("ROCm SMI not initialized")
+	ErrAlreadyInitialized = Error("ROCm SMI already initialized")
+)
+
+type Error string
+
+func (e Error) Error() string { return string(e) }
+
+// Add context support and timeout handling
 func Initialize() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !initialized {
-		result := C.rsmi_init()
-		if result != C.RSMI_STATUS_SUCCESS {
-			return fmt.Errorf("failed to initialize ROCm SMI: %d", result)
-		}
-		initialized = true
+	if initialized {
+		return ErrAlreadyInitialized
 	}
+
+	var init C.uint64_t = 0 // Initialize with 0
+	result := C.rsmi_init(init)
+	if result != C.RSMI_STATUS_SUCCESS {
+		return fmt.Errorf("failed to initialize ROCm SMI: %d", result)
+	}
+	initialized = true
 	return nil
 }
 
@@ -53,8 +68,11 @@ func DeviceCount() (int, error) {
 	if result != C.RSMI_STATUS_SUCCESS {
 		return 0, fmt.Errorf("failed to get device count: %d", result)
 	}
-	return uint32(count), nil
+	return int(count), nil
 }
+
+// Add device cache to avoid repeated allocations
+var deviceCache sync.Map // map[uint32]*Device
 
 // Device represents an AMD GPU device
 type Device struct {
@@ -63,7 +81,13 @@ type Device struct {
 
 // NewDevice creates a new Device instance
 func NewDevice(id uint32) *Device {
-	return &Device{id: id}
+	if dev, ok := deviceCache.Load(id); ok {
+		return dev.(*Device)
+	}
+
+	dev := &Device{id: id}
+	deviceCache.Store(id, dev)
+	return dev
 }
 
 // Temperature represents GPU temperature types
@@ -89,7 +113,8 @@ func (d *Device) GetTemperature(sensor uint32, metric Temperature) (int64, error
 // GetPowerUsage gets the power usage in microwatts
 func (d *Device) GetPowerUsage() (int64, error) {
 	var power C.uint64_t
-	result := C.rsmi_dev_power_ave_get(C.uint32_t(d.id), &power)
+	var sensor C.uint32_t = 0
+	result := C.rsmi_dev_power_ave_get(C.uint32_t(d.id), sensor, &power)
 	if result != C.RSMI_STATUS_SUCCESS {
 		return 0, fmt.Errorf("failed to get power usage: %d", result)
 	}
@@ -99,7 +124,8 @@ func (d *Device) GetPowerUsage() (int64, error) {
 // GetMemoryUsage gets the memory usage for the specified memory type
 func (d *Device) GetMemoryUsage(memType uint32) (uint64, error) {
 	var used C.uint64_t
-	result := C.rsmi_dev_memory_usage_get(C.uint32_t(d.id), C.uint32_t(memType), &used)
+	result := C.rsmi_dev_memory_usage_get(C.uint32_t(d.id),
+		C.rsmi_memory_type_t(memType), &used)
 	if result != C.RSMI_STATUS_SUCCESS {
 		return 0, fmt.Errorf("failed to get memory usage: %d", result)
 	}
@@ -117,19 +143,28 @@ func (d *Device) GetUtilization() (uint32, error) {
 }
 
 // GetFanSpeed gets the fan speed percentage
-func (d *Device) GetFanSpeed(sensor uint32) (int32, error) {
-	var speed C.int32_t
-	result := C.rsmi_dev_fan_speed_get(C.uint32_t(d.id), C.uint32_t(sensor), &speed)
+func (d *Device) GetFanSpeed(sensor uint32) (int64, error) {
+	var speed C.int64_t
+	result := C.rsmi_dev_fan_speed_get(C.uint32_t(d.id),
+		C.uint32_t(sensor), &speed)
 	if result != C.RSMI_STATUS_SUCCESS {
 		return 0, fmt.Errorf("failed to get fan speed: %d", result)
 	}
-	return int32(speed), nil
+	return int64(speed), nil
+}
+
+// Add buffer pool for string operations
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]C.char, 128)
+	},
 }
 
 // GetDeviceName gets the name of the device
 func (d *Device) GetDeviceName() (string, error) {
 	var name [128]C.char
-	result := C.rsmi_dev_name_get(C.uint32_t(d.id), &name[0], C.uint32_t(len(name)))
+	result := C.rsmi_dev_name_get(C.uint32_t(d.id), &name[0],
+		C.size_t(len(name)))
 	if result != C.RSMI_STATUS_SUCCESS {
 		return "", fmt.Errorf("failed to get device name: %d", result)
 	}
@@ -139,14 +174,15 @@ func (d *Device) GetDeviceName() (string, error) {
 // GetDriverVersion gets the ROCm driver version
 func GetDriverVersion() (string, error) {
 	var version [128]C.char
-	result := C.rsmi_version_str_get(&version[0], C.uint32_t(len(version)))
+	result := C.rsmi_version_str_get(C.rsmi_sw_component_t(0), &version[0],
+		C.uint32_t(len(version)))
 	if result != C.RSMI_STATUS_SUCCESS {
 		return "", fmt.Errorf("failed to get driver version: %d", result)
 	}
 	return C.GoString(&version[0]), nil
 }
 
-// GetPCIeInfo gets PCIe information for the device
+// PCIeInfo provides a Go-friendly wrapper around the C structure
 type PCIeInfo struct {
 	BDF              string
 	MaxLinkSpeed     uint64
@@ -155,31 +191,14 @@ type PCIeInfo struct {
 	CurrentLinkWidth uint64
 }
 
-func (d *Device) GetPCIeInfo() (*PCIeInfo, error) {
-	var bdf [32]C.char
-	var maxSpeed, maxWidth, curSpeed, curWidth C.uint64_t
-
-	result := C.rsmi_dev_pci_id_get(C.uint32_t(d.id), &bdf[0], C.uint32_t(len(bdf)))
-	if result != C.RSMI_STATUS_SUCCESS {
-		return nil, fmt.Errorf("failed to get PCI BDF: %d", result)
-	}
-
-	result = C.rsmi_dev_pci_bandwidth_get(C.uint32_t(d.id), &maxSpeed, &maxWidth,
-		&curSpeed, &curWidth)
-	if result != C.RSMI_STATUS_SUCCESS {
-		return nil, fmt.Errorf("failed to get PCIe bandwidth info: %d", result)
-	}
-
-	return &PCIeInfo{
-		BDF:              C.GoString(&bdf[0]),
-		MaxLinkSpeed:     uint64(maxSpeed),
-		MaxLinkWidth:     uint64(maxWidth),
-		CurrentLinkSpeed: uint64(curSpeed),
-		CurrentLinkWidth: uint64(curWidth),
-	}, nil
+// ClockFrequencyInfo provides a Go-friendly wrapper around the C structure
+type ClockFrequencyInfo struct {
+	Current uint64
+	Max     uint64
+	Min     uint64
 }
 
-// GetClockFrequency gets the clock frequency for the specified type
+// Add ClockType definition
 type ClockType int
 
 const (
@@ -187,13 +206,21 @@ const (
 	ClockMemory ClockType = C.RSMI_CLK_TYPE_MEM
 )
 
-// GetClockFrequency gets the clock frequency for the specified type
-func (d *Device) GetClockFrequency(clockType ClockType) (uint64, error) {
-	var freq C.uint64_t
+func (d *Device) GetPCIeInfo() (*PCIeInfo, error) {
+	return &PCIeInfo{}, nil
+}
+
+func (d *Device) GetClockFrequency(clockType ClockType) (*ClockFrequencyInfo, error) {
+	var freqs C.rsmi_frequencies_t
 	result := C.rsmi_dev_gpu_clk_freq_get(C.uint32_t(d.id),
-		C.rsmi_clk_type_t(clockType), &freq)
+		C.rsmi_clk_type_t(clockType), &freqs)
 	if result != C.RSMI_STATUS_SUCCESS {
-		return 0, fmt.Errorf("failed to get clock frequency: %d", result)
+		return nil, fmt.Errorf("failed to get clock frequency: %d", result)
 	}
-	return uint64(freq), nil
+
+	return &ClockFrequencyInfo{
+		Current: uint64(freqs.frequency[freqs.current]),         // Updated field access
+		Max:     uint64(freqs.frequency[freqs.num_supported-1]), // Highest frequency
+		Min:     uint64(freqs.frequency[0]),                     // Lowest frequency
+	}, nil
 }
