@@ -4,7 +4,7 @@
 [![GoDoc](https://godoc.org/github.com/xigang/go-rocm?status.svg)](https://godoc.org/github.com/xigang/go-rocm)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A lightweight Go wrapper for AMD's ROCm System Management Interface (SMI) library. Monitor and control AMD GPUs with ease.
+A lightweight Go wrapper for [AMD's ROCm System Management Interface (SMI)](https://github.com/ROCm/rocm_smi_lib) library. Monitor and control AMD GPUs with ease.
 
 ## Overview
 
