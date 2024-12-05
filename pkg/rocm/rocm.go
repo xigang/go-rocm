@@ -121,15 +121,36 @@ func (d *Device) GetPowerUsage() (int64, error) {
 	return int64(power), nil
 }
 
+// MemoryType represents GPU memory types
+type MemoryType uint32
+
+// Memory type constants using the new type
+const (
+	MemVRAM MemoryType = 0 // VRAM memory
+	MemVIS  MemoryType = 1 // Visible memory
+	MemGTT  MemoryType = 2 // Graphics Translation Table memory
+)
+
 // GetMemoryUsage gets the memory usage for the specified memory type
-func (d *Device) GetMemoryUsage(memType uint32) (uint64, error) {
+func (d *Device) GetMemoryUsage(memType MemoryType) (uint64, error) {
 	var used C.uint64_t
 	result := C.rsmi_dev_memory_usage_get(C.uint32_t(d.id),
 		C.rsmi_memory_type_t(memType), &used)
 	if result != C.RSMI_STATUS_SUCCESS {
-		return 0, fmt.Errorf("failed to get memory usage: %d", result)
+		return 0, fmt.Errorf("failed to get memory usage for type %d: %d", memType, result)
 	}
 	return uint64(used), nil
+}
+
+// GetMemoryTotal gets the total memory capacity for the specified memory type
+func (d *Device) GetMemoryTotal(memType MemoryType) (uint64, error) {
+	var total C.uint64_t
+	result := C.rsmi_dev_memory_total_get(C.uint32_t(d.id),
+		C.rsmi_memory_type_t(memType), &total)
+	if result != C.RSMI_STATUS_SUCCESS {
+		return 0, fmt.Errorf("failed to get total memory for type %d: %d", memType, result)
+	}
+	return uint64(total), nil
 }
 
 // GetUtilization gets the GPU utilization percentage
@@ -206,10 +227,12 @@ const (
 	ClockMemory ClockType = C.RSMI_CLK_TYPE_MEM
 )
 
+// GetPCIeInfo gets the PCIe information for the device
 func (d *Device) GetPCIeInfo() (*PCIeInfo, error) {
 	return &PCIeInfo{}, nil
 }
 
+// GetClockFrequency gets the clock frequency information for the device
 func (d *Device) GetClockFrequency(clockType ClockType) (*ClockFrequencyInfo, error) {
 	var freqs C.rsmi_frequencies_t
 	result := C.rsmi_dev_gpu_clk_freq_get(C.uint32_t(d.id),
