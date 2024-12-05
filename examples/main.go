@@ -40,15 +40,20 @@ func main() {
 			klog.Errorf("Failed to get utilization for device %d: %v", i, err)
 		}
 
-		mem, err := device.GetMemoryUsage(0)
+		memUsed, err := device.GetMemoryUsage(rocm.MemVRAM)
 		if err != nil {
 			klog.Errorf("Failed to get memory info for device %d: %v", i, err)
+		}
+
+		memTotal, err := device.GetMemoryTotal(rocm.MemVRAM)
+		if err != nil {
+			klog.Errorf("Failed to get memory total for device %d: %v", i, err)
 		}
 
 		klog.Infof("Device %d (%s):\n", i, name)
 		klog.Infof("  Temperature: %d°C\n", temp)
 		klog.Infof("  Power: %d W\n", power/1000000)
 		klog.Infof("  Utilization: %d%%\n", util)
-		klog.Infof("  Memory: %+v\n", mem)
+		klog.Infof("  Memory: %d/%d\n", memUsed, memTotal)
 	}
 }
