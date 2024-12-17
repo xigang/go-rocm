@@ -30,6 +30,11 @@ func main() {
 			klog.Errorf("Failed to get temperature for device %d: %v", i, err)
 		}
 
+		minor, err := device.GetMinorNumber()
+		if err != nil {
+			klog.Errorf("Failed to get minor number for device %d: %v", i, err)
+		}
+
 		power, err := device.GetPowerUsage()
 		if err != nil {
 			klog.Errorf("Failed to get power for device %d: %v", i, err)
@@ -51,6 +56,7 @@ func main() {
 		}
 
 		klog.Infof("Device %d (%s):\n", i, name)
+		klog.Infof("  Minor: %d\n", minor)
 		klog.Infof("  Temperature: %d°C\n", temp)
 		klog.Infof("  Power: %d W\n", power/1000000)
 		klog.Infof("  Utilization: %d%%\n", util)

@@ -247,3 +247,17 @@ func (d *Device) GetClockFrequency(clockType ClockType) (*ClockFrequencyInfo, er
 		Min:     uint64(freqs.frequency[0]),                     // Lowest frequency
 	}, nil
 }
+
+// GetMinorNumber returns the minor number of the device
+func (d *Device) GetMinorNumber() (uint32, error) {
+	if !initialized {
+		return 0, ErrNotInitialized
+	}
+
+	var minor C.uint32_t
+	result := C.rsmi_dev_drm_render_minor_get(C.uint32_t(d.id), &minor)
+	if result != C.RSMI_STATUS_SUCCESS {
+		return 0, fmt.Errorf("failed to get device minor number: %d", result)
+	}
+	return uint32(minor), nil
+}
