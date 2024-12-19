@@ -25,6 +25,11 @@ func main() {
 			klog.Errorf("Failed to get device name for device %d: %v", i, err)
 		}
 
+		uuid, err := device.GetDeviceUUID()
+		if err != nil {
+			klog.Errorf("Failed to get device UUID for device %d: %v", i, err)
+		}
+
 		temp, err := device.GetTemperature(0, rocm.TempCurrent)
 		if err != nil {
 			klog.Errorf("Failed to get temperature for device %d: %v", i, err)
@@ -57,6 +62,7 @@ func main() {
 
 		klog.Infof("Device %d (%s):\n", i, name)
 		klog.Infof("  Minor: %d\n", minor)
+		klog.Infof("  UUID: %s\n", uuid)
 		klog.Infof("  Temperature: %d°C\n", temp)
 		klog.Infof("  Power: %d W\n", power/1000000)
 		klog.Infof("  Utilization: %d%%\n", util)

@@ -192,8 +192,24 @@ func (d *Device) GetDeviceName() (string, error) {
 	return C.GoString(&name[0]), nil
 }
 
+// GetDeviceUUID gets the UUID of the device
+func (d *Device) GetDeviceUUID() (string, error) {
+	if !initialized {
+		return "", ErrNotInitialized
+	}
+
+	var id C.uint64_t
+	result := C.rsmi_dev_unique_id_get(C.uint32_t(d.id), &id)
+	if result != C.RSMI_STATUS_SUCCESS {
+		return "", fmt.Errorf("failed to get device UUID: %d", result)
+	}
+
+	// Convert uint64 to string representation
+	return fmt.Sprintf("%016x", uint64(id)), nil
+}
+
 // GetDriverVersion gets the ROCm driver version
-func GetDriverVersion() (string, error) {
+func (d *Device) GetDriverVersion() (string, error) {
 	var version [128]C.char
 	result := C.rsmi_version_str_get(C.rsmi_sw_component_t(0), &version[0],
 		C.uint32_t(len(version)))
